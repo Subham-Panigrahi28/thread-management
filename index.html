@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thread Management for High-Performance Web Servers | OS Project</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="header-titles">
+        <div class="project-tag">Operating Systems Project Demonstration</div>
+        <h1>Thread Management for High-Performance Web Servers</h1>
+        <p class="subtitle">Concurrent request handling, producer-consumer queue synchronization, and bounded worker pools.</p>
+      </div>
+      <div class="header-actions">
+        <button id="btnRunTests" class="btn btn-accent" title="Run the automated OS test suite directly in this web page">
+          <span class="icon">&#9658;</span> Run OS Unit Tests
+        </button>
+        <button id="btnExport" class="btn btn-secondary" title="Export benchmark results to JSON file">
+          <span class="icon">&#128190;</span> Export JSON
+        </button>
+        <button id="btnReset" class="btn btn-danger-outline" title="Reset all current metrics and history">
+          Reset Results
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="dashboard-container">
+    <!-- Quick Viva Cheat-Sheet / 30-Second Explainer -->
+    <section class="viva-summary-box" aria-label="Viva Explanation Guide">
+      <div class="viva-header">
+        <span class="viva-badge">Viva Cheat-Sheet</span>
+        <h2>How to Explain This Project in 30 Seconds</h2>
+      </div>
+      <div class="viva-grid">
+        <div class="viva-card">
+          <div class="viva-step">1. The Problem</div>
+          <h3>Sequential Baseline (1 Worker)</h3>
+          <p>Processes requests strictly one-by-one. When a request waits on I/O (e.g. 20ms database/network wait), the single thread blocks. 100 requests take <strong>~2.05 seconds</strong> total.</p>
+        </div>
+        <div class="viva-card highlight-card">
+          <div class="viva-step">2. The Solution</div>
+          <h3>Bounded Thread Pool (8 Workers)</h3>
+          <p>8 pre-allocated reusable workers consume tasks concurrently. While some threads wait on I/O, others process requests. 100 requests take only <strong>0.27 seconds</strong> (<strong>7.6x speedup</strong>)!</p>
+        </div>
+        <div class="viva-card">
+          <div class="viva-step">3. The Safety Mechanism</div>
+          <h3>Bounded Queue & Back-pressure</h3>
+          <p>Unbounded queues cause memory exhaustion (OOM crashes). Our bounded FIFO queue enforces back-pressure: excess requests are rejected (<code>REJECTED</code>) immediately, protecting server stability.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Prominent Verdict / Output Banner -->
+    <section id="verdictBanner" class="verdict-banner">
+      <div class="verdict-icon">&#127942;</div>
+      <div class="verdict-body">
+        <div class="verdict-tag">Measured Performance Verdict</div>
+        <h2 id="verdictTitle" class="verdict-headline">Bounded Thread Pool is 7.59x Faster than Sequential Baseline</h2>
+        <p id="verdictSub" class="verdict-sub">Throughput increased from <strong>48.8 req/sec</strong> to <strong>370.7 req/sec</strong> with zero request drops on identical 100-request workloads.</p>
+      </div>
+      <div class="verdict-stats">
+        <div class="v-stat">
+          <span class="v-label">Duration Reduction</span>
+          <span id="vStatDuration" class="v-val">2.05s &#8594; 0.27s</span>
+        </div>
+        <div class="v-stat">
+          <span class="v-label">Throughput Boost</span>
+          <span id="vStatThroughput" class="v-val text-teal">+660% (7.6x)</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Embedded OS Unit Test Console (Output inside website) -->
+    <section id="testConsoleSection" class="panel test-console-panel" style="display: none;">
+      <div class="panel-header">
+        <div class="test-header-left">
+          <h2 class="section-title">Automated OS Unit Tests Output (13 Scenarios)</h2>
+          <span id="testBadge" class="mode-badge badge-active">Executing...</span>
+        </div>
+        <button id="btnCloseTests" class="btn btn-sm btn-secondary">Close Terminal</button>
+      </div>
+      <div class="terminal-window">
+        <div class="terminal-bar">
+          <div class="term-dots"><span></span><span></span><span></span></div>
+          <div class="term-title">python -m unittest discover -s tests -v</div>
+        </div>
+        <pre id="testOutputPre" class="terminal-body">Running automated test suite...</pre>
+      </div>
+    </section>
+
+    <!-- Side-by-Side Comparison Output Section -->
+    <section class="panel comparison-panel" aria-labelledby="compare-heading">
+      <div class="panel-header">
+        <div>
+          <h2 id="compare-heading" class="section-title">Baseline vs Bounded Pool Comparison Output</h2>
+          <span id="compTimestamp" class="comp-time">Preloaded from verified evaluation run</span>
+        </div>
+        <div class="header-badges">
+          <span class="badge badge-baseline">Baseline: 1 Worker</span>
+          <span class="badge badge-pool">Pool: 8 Workers</span>
+        </div>
+      </div>
+
+      <!-- Quick Comparison Cards -->
+      <div class="comparison-cards-grid">
+        <div class="side-card side-baseline">
+          <div class="side-header">
+            <h3>Sequential Baseline</h3>
+            <span class="pill pill-muted">1 Worker Thread</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">Throughput</span>
+            <span id="cardBaseThroughput" class="sm-val">48.8 req/s</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">Wall-Clock Duration</span>
+            <span id="cardBaseDuration" class="sm-val">2.05s</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">Average Task Latency</span>
+            <span id="cardBaseAvgLat" class="sm-val">20.4 ms</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">p95 Tail Latency</span>
+            <span id="cardBaseP95" class="sm-val">20.7 ms</span>
+          </div>
+          <div class="side-note">Serial execution bottleneck: each request must wait for preceding request to complete.</div>
+        </div>
+
+        <div class="speedup-center-card">
+          <div class="speedup-circle">
+            <span id="centerSpeedupVal" class="sc-val">7.6x</span>
+            <span class="sc-label">SPEEDUP</span>
+          </div>
+          <div class="speedup-diff-text" id="centerDiffText">
+            Duration cut by <strong>1.78 seconds</strong>
+          </div>
+        </div>
+
+        <div class="side-card side-pool">
+          <div class="side-header">
+            <h3>Bounded Thread Pool</h3>
+            <span class="pill pill-teal">8 Worker Threads</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">Throughput</span>
+            <span id="cardPoolThroughput" class="sm-val text-teal">370.7 req/s</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">Wall-Clock Duration</span>
+            <span id="cardPoolDuration" class="sm-val text-teal">0.27s</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">Average Task Latency</span>
+            <span id="cardPoolAvgLat" class="sm-val">20.4 ms</span>
+          </div>
+          <div class="side-metric">
+            <span class="sm-label">p95 Tail Latency</span>
+            <span id="cardPoolP95" class="sm-val">20.8 ms</span>
+          </div>
+          <div class="side-note">Concurrent overlap: 8 requests processed simultaneously during I/O waits.</div>
+        </div>
+      </div>
+
+      <!-- Visual Comparison Chart (Plain SVG / Pure CSS) -->
+      <div class="chart-wrapper">
+        <div class="chart-title">Visual Comparison Chart (Pure SVG)</div>
+        <div id="visualChartContainer" class="chart-container"></div>
+      </div>
+
+      <!-- Comparison Detailed Data Table -->
+      <div class="table-responsive">
+        <table class="data-table" aria-label="Comparison Table">
+          <thead>
+            <tr>
+              <th scope="col">Evaluation Metric</th>
+              <th scope="col">Sequential Baseline (1 Worker)</th>
+              <th scope="col">Bounded Thread Pool (8 Workers)</th>
+              <th scope="col">Observed Difference / Speedup</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Throughput (req/sec)</strong></td>
+              <td id="tblBaseThroughput">48.77 req/s</td>
+              <td id="tblPoolThroughput" class="text-teal font-bold">370.66 req/s</td>
+              <td id="tblDiffThroughput" class="text-highlight">7.60x Higher Throughput</td>
+            </tr>
+            <tr>
+              <td><strong>Wall-Clock Duration</strong></td>
+              <td id="tblBaseDuration">2.05s</td>
+              <td id="tblPoolDuration" class="text-teal font-bold">0.27s</td>
+              <td id="tblDiffDuration" class="text-highlight">7.59x Faster</td>
+            </tr>
+            <tr>
+              <td><strong>Average Task Latency</strong></td>
+              <td id="tblBaseAvgLat">20.40 ms</td>
+              <td id="tblPoolAvgLat">20.35 ms</td>
+              <td id="tblDiffAvgLat">Identical per-task execution</td>
+            </tr>
+            <tr>
+              <td><strong>95th Percentile (p95)</strong></td>
+              <td id="tblBaseP95">20.69 ms</td>
+              <td id="tblPoolP95">20.80 ms</td>
+              <td id="tblDiffP95">Tightly bounded tail latency</td>
+            </tr>
+            <tr>
+              <td><strong>Successful / Attempted</strong></td>
+              <td id="tblBaseSuccess">100 / 100</td>
+              <td id="tblPoolSuccess">100 / 100</td>
+              <td>100% Request Completion</td>
+            </tr>
+            <tr>
+              <td><strong>Queue Overload Rejections</strong></td>
+              <td id="tblBaseRejections">0</td>
+              <td id="tblPoolRejections">0</td>
+              <td id="tblDiffRejections">No drops (Capacity sufficient)</td>
+            </tr>
+            <tr>
+              <td><strong>Max Queue Depth</strong></td>
+              <td id="tblBaseMaxQueue">99</td>
+              <td id="tblPoolMaxQueue">92</td>
+              <td id="tblDiffMaxQueue">Pool drains backlog 8x faster</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Main Control Panel with Quick Presets -->
+    <section class="panel control-panel" aria-labelledby="controls-heading">
+      <div class="panel-header">
+        <h2 id="controls-heading" class="section-title">Interactive Benchmark Controls</h2>
+        <span class="field-hint">Run live custom benchmarks or choose a 1-click viva preset</span>
+      </div>
+
+      <!-- Quick Preset Buttons -->
+      <div class="presets-container">
+        <span class="presets-label">1-Click Viva Presets:</span>
+        <button id="presetStandard" class="btn btn-preset active-preset" title="100 requests, 8 workers, 20ms I/O (Recommended viva demo)">
+          &#127919; Standard 7.6x Speedup Demo
+        </button>
+        <button id="presetOverload" class="btn btn-preset" title="100 requests with queue capacity of 10 to demonstrate back-pressure">
+          &#128680; Overload & Rejection Demo
+        </button>
+        <button id="presetFastCPU" class="btn btn-preset" title="200 requests with 0ms I/O to evaluate CPU dispatch">
+          &#9889; Fast CPU Dispatch (0ms I/O)
+        </button>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="selectMode">Execution Mode</label>
+          <select id="selectMode" class="form-input">
+            <option value="bounded_pool" selected>Bounded Thread Pool (Multi-Worker)</option>
+            <option value="baseline">Sequential Baseline (1 Worker)</option>
+          </select>
+          <span class="field-hint">Select single mode or run fair comparison.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="inputWorkers">Worker Threads (<span id="lblWorkers">8</span>)</label>
+          <input type="range" id="inputWorkers" min="1" max="32" value="8" class="range-slider">
+          <span class="field-hint">Pre-spawned reusable worker threads (1-32).</span>
+        </div>
+
+        <div class="form-group">
+          <label for="inputQueueCap">Bounded Queue Capacity (<span id="lblQueueCap">100</span>)</label>
+          <input type="range" id="inputQueueCap" min="5" max="500" step="5" value="100" class="range-slider">
+          <span class="field-hint">FIFO queue capacity. Excess requests reject immediately.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="inputReqCount">Total Requests (<span id="lblReqCount">100</span>)</label>
+          <input type="range" id="inputReqCount" min="20" max="1000" step="20" value="100" class="range-slider">
+          <span class="field-hint">Total volume of requests generated by client producers.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="inputProducerConc">Client Producer Concurrency (<span id="lblProducerConc">10</span>)</label>
+          <input type="range" id="inputProducerConc" min="1" max="50" value="10" class="range-slider">
+          <span class="field-hint">Simultaneous client threads pushing tasks to the queue.</span>
+        </div>
+
+        <div class="form-group">
+          <label for="selectWorkload">Simulated Workload</label>
+          <select id="selectWorkload" class="form-input">
+            <option value="20" selected>Simulated I/O Wait (20 ms / task - standard)</option>
+            <option value="50">Medium Simulated I/O Wait (50 ms / task)</option>
+            <option value="100">Heavy Simulated I/O Wait (100 ms / task)</option>
+            <option value="0">Fast No-Wait (0 ms / pure CPU dispatch)</option>
+          </select>
+          <span class="field-hint">Simulates database or remote API latency via non-blocking sleep.</span>
+        </div>
+      </div>
+
+      <div class="control-actions">
+        <button id="btnRunCompare" class="btn btn-primary">
+          <span class="icon">&#9881;</span> Run Live Fair Comparison (Baseline vs Pool)
+        </button>
+        <button id="btnRunSingle" class="btn btn-secondary">
+          Run Single Benchmark
+        </button>
+      </div>
+
+      <!-- Execution Status Bar -->
+      <div id="statusBar" class="status-bar status-idle" aria-live="polite">
+        <div class="status-indicator"></div>
+        <div class="status-details">
+          <div id="statusTitle" class="status-title">Status: Ready (Showing Evaluated Results)</div>
+          <div id="statusSub" class="status-sub">Click "Run Live Fair Comparison" to rerun the benchmark live on your machine.</div>
+        </div>
+        <div class="status-meters">
+          <div class="mini-meter">
+            <span class="meter-label">Queue Depth</span>
+            <span id="meterQueue" class="meter-val">0</span>
+          </div>
+          <div class="mini-meter">
+            <span class="meter-label">Active Workers</span>
+            <span id="meterWorkers" class="meter-val">0</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Primary Metrics Cards -->
+    <section class="panel metrics-panel" aria-labelledby="metrics-heading">
+      <div class="panel-header">
+        <h2 id="metrics-heading" class="section-title">Latest Run Telemetry Cards</h2>
+        <span id="activeRunBadge" class="mode-badge badge-active">Bounded Pool (8w)</span>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Throughput</div>
+          <div id="valThroughput" class="metric-value text-teal">370.7</div>
+          <div class="metric-unit">completed req / sec</div>
+          <div class="metric-desc">Successful completions / wall-clock time</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Average Latency</div>
+          <div id="valAvgLatency" class="metric-value">20.4</div>
+          <div class="metric-unit">milliseconds</div>
+          <div class="metric-desc">Mean task duration</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">95th Percentile (p95)</div>
+          <div id="valP95Latency" class="metric-value">20.8</div>
+          <div class="metric-unit">milliseconds</div>
+          <div class="metric-desc">Nearest-rank tail latency ceiling</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Wall-Clock Duration</div>
+          <div id="valDuration" class="metric-value text-teal">0.27s</div>
+          <div class="metric-unit">seconds</div>
+          <div class="metric-desc">Total elapsed benchmark time</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Completed / Attempted</div>
+          <div class="metric-value"><span id="valSuccessful">100</span> / <span id="valAttempted">100</span></div>
+          <div class="metric-unit">requests</div>
+          <div class="metric-desc">Accepted into queue: <span id="valAccepted">100</span></div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Queue Overload / Failures</div>
+          <div class="metric-value text-warning"><span id="valRejected">0</span> / <span id="valFailed">0</span></div>
+          <div class="metric-unit">rejections / task errors</div>
+          <div class="metric-desc">Max Observed Queue Depth: <span id="valMaxQueue">92</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recent Request Event Log -->
+    <section class="panel log-panel" aria-labelledby="log-heading">
+      <div class="panel-header">
+        <h2 id="log-heading" class="section-title">Live Request Stream & Thread Inspection</h2>
+        <span class="field-hint">Inspecting recent task dispatches across worker threads</span>
+      </div>
+
+      <div class="table-responsive log-table-wrapper">
+        <table class="data-table" aria-label="Request Event Log">
+          <thead>
+            <tr>
+              <th scope="col">Timestamp</th>
+              <th scope="col">Request ID</th>
+              <th scope="col">Worker / Thread</th>
+              <th scope="col">Status</th>
+              <th scope="col">Execution Latency</th>
+              <th scope="col">Notes / Reason</th>
+            </tr>
+          </thead>
+          <tbody id="logTableBody">
+            <tr>
+              <td colspan="6" class="text-center empty-cell">Loading recent request events...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- System Resource Telemetry -->
+    <section class="panel telemetry-panel">
+      <div class="telemetry-info">
+        <span class="telemetry-title">Host Telemetry:</span>
+        <span id="telemetryStatus">Sampling host system resources...</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="footer-container">
+      <div>Operating Systems Concurrency Laboratory Project: Thread Management Evaluation</div>
+      <div>Strictly local host execution on <code>127.0.0.1</code> | Pure Python standard library implementation</div>
+    </div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
